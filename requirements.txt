@@ -1,0 +1,4 @@
+asciinema
+blessed
+pyaudio
+wave
