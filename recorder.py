@@ -1,43 +1,52 @@
-#!/usr/bin/env python3
+"""Record terminal session with audio."""
+
+import json
+import os
+import pyaudio
 import subprocess
+import sys
 import threading
 import time
-import json
 import wave
-import pyaudio
-import os
+
+from util import CHUNK, parse_args
+
+
+CHANNELS = 1
+FORMAT = pyaudio.paInt16
+RATE = 44100
+
 
 class TerminalRecorder:
-    def __init__(self):
+    def __init__(self, session_filename, audio_filename):
+        self.session_filename = session_filename
+        self.audio_filename = audio_filename
         self.recording = False
-        self.terminal_output = []
-        self.start_time = None
 
     def record_terminal(self):
-        process = subprocess.Popen(['asciinema', 'rec', '-'], 
-                                 stdout=subprocess.PIPE,
-                                 universal_newlines=True)
-        self.start_time = time.time()
-        
+        process = subprocess.Popen(
+            ["asciinema", "rec", "-"], 
+            stdout=subprocess.PIPE,
+            universal_newlines=True
+        )
+        terminal_output = []
         while self.recording:
             line = process.stdout.readline()
             if line:
-                timestamp = time.time() - self.start_time
-                self.terminal_output.append([timestamp, line])
+                terminal_output.append(json.loads(line))
         process.terminate()
+        with open(self.session_filename, "w") as writer:
+            json.dump(terminal_output[1:], writer)
 
-    def record_audio(self, filename="audio.wav"):
-        CHUNK = 1024
-        FORMAT = pyaudio.paInt16
-        CHANNELS = 1
-        RATE = 44100
-
+    def record_audio(self):
         p = pyaudio.PyAudio()
-        stream = p.open(format=FORMAT,
-                       channels=CHANNELS,
-                       rate=RATE,
-                       input=True,
-                       frames_per_buffer=CHUNK)
+        stream = p.open(
+            format=FORMAT,
+            channels=CHANNELS,
+            rate=RATE,
+            input=True,
+            frames_per_buffer=CHUNK
+        )
 
         frames = []
         while self.recording:
@@ -48,29 +57,17 @@ class TerminalRecorder:
         stream.close()
         p.terminate()
 
-        wf = wave.open(filename, 'wb')
+        wf = wave.open(self.audio_filename, "wb")
         wf.setnchannels(CHANNELS)
         wf.setsampwidth(p.get_sample_size(FORMAT))
         wf.setframerate(RATE)
-        wf.writeframes(b''.join(frames))
+        wf.writeframes(b"".join(frames))
         wf.close()
-
-    def save_session(self, output_file="session.json"):
-        session_data = {
-            "version": 2,
-            "width": 80,
-            "height": 24,
-            "timestamp": int(self.start_time),
-            "events": self.terminal_output
-        }
-        with open(output_file, 'w') as f:
-            json.dump(session_data, f)
 
     def start_recording(self):
         self.recording = True
         self.terminal_thread = threading.Thread(target=self.record_terminal)
         self.audio_thread = threading.Thread(target=self.record_audio)
-        
         self.terminal_thread.start()
         self.audio_thread.start()
 
@@ -78,18 +75,20 @@ class TerminalRecorder:
         self.recording = False
         self.terminal_thread.join()
         self.audio_thread.join()
-        self.save_session()
+
 
 def main():
-    recorder = TerminalRecorder()
-    print("Recording started. Press Ctrl+C to stop.")
+    session_filename, audio_filename = parse_args()
+    recorder = TerminalRecorder(session_filename, audio_filename)
+    print("Recording started. Press <ctrl-c> after asciinema exits.")
     try:
         recorder.start_recording()
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
         recorder.stop_recording()
-        print("Recording stopped. Session saved.")
+        print("Recording stopped.")
+
 
 if __name__ == "__main__":
     main()
